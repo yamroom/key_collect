@@ -65,10 +65,18 @@ sub sanitize_name {
     my ($text) = @_;
     $text = '' unless defined $text;
     $text =~ s/^\s+|\s+$//g;
-    $text =~ s{[\\/:*?"<>|=\s]+}{_}g;
+    $text =~ s/[\r\n\t]+/ /g;
+    $text =~ s/\s{2,}/ /g;
+    $text =~ s{[\\/:*?"<>|]+}{_}g;
     $text =~ s/_+/_/g;
-    $text =~ s/^_+|_+$//g;
     return length $text ? $text : 'value';
+}
+
+sub ensure_relative_path {
+    my ($path, $field_name) = @_;
+
+    die "$field_name '$path' must be a relative path.\n"
+        if File::Spec->file_name_is_absolute($path);
 }
 
 sub normalize_modifications {
@@ -81,6 +89,7 @@ sub normalize_modifications {
 
         die "A modification is missing file.\n"
             unless defined $mod->{file} && length $mod->{file};
+        ensure_relative_path($mod->{file}, 'Modification file');
 
         die "A modification for file '$mod->{file}' is missing keyword.\n"
             unless defined $mod->{keyword} && length $mod->{keyword};
@@ -109,6 +118,44 @@ sub normalize_modifications {
     }
 
     return @normalized;
+}
+
+sub validate_commands {
+    my ($commands) = @_;
+
+    foreach my $cmd (@$commands) {
+        die "Each item in \@commands must be a string.\n"
+            if ref $cmd;
+
+        die "Found an empty command in \@commands.\n"
+            unless defined $cmd && $cmd =~ /\S/;
+    }
+}
+
+sub extract_first_command_word {
+    my ($cmd) = @_;
+    my $rest = $cmd;
+    $rest =~ s/^\s+//;
+
+    while ($rest =~ s/^\w+=(?:"[^"]*"|'[^']*'|\S+)\s+//) {
+    }
+
+    my ($word) = $rest =~ /^([^\s|&;<>()]+)/;
+    return $word;
+}
+
+sub validate_command_tools {
+    my ($commands) = @_;
+
+    foreach my $cmd (@$commands) {
+        my $word = extract_first_command_word($cmd);
+        next unless defined $word && length $word;
+        next if $word =~ m{[/\\]};
+
+        my $status = system('sh', '-lc', "command -v '$word' >/dev/null 2>&1");
+        die "Command '$cmd' failed preflight because '$word' was not found in PATH.\n"
+            if $status != 0;
+    }
 }
 
 sub load_original_contents {
@@ -177,6 +224,31 @@ sub prepare_modifications {
     }
 }
 
+sub validate_modification_targets {
+    my ($modifications) = @_;
+    my %seen_targets;
+    my %seen_lines;
+
+    foreach my $mod (@$modifications) {
+        foreach my $line_num (@{$mod->{resolved_lines}}) {
+            my $key = join "\0", $mod->{file}, $line_num, $mod->{keyword};
+            my $line_key = join "\0", $mod->{file}, $line_num;
+
+            die "Duplicate modification target detected for file '$mod->{file}', line $line_num, keyword '$mod->{keyword}'.\n"
+                if $seen_targets{$key};
+
+            if (exists $seen_lines{$line_key}) {
+                my $previous_keyword = $seen_lines{$line_key};
+                die "Multiple modifications target file '$mod->{file}', line $line_num. "
+                    . "This is order-dependent ('$previous_keyword' and '$mod->{keyword}'), so please merge them into one edit or use different lines.\n";
+            }
+
+            $seen_targets{$key} = 1;
+            $seen_lines{$line_key} = $mod->{keyword};
+        }
+    }
+}
+
 sub generate_combinations {
     my @arrays = @_;
     my @combinations = ([]);
@@ -203,7 +275,7 @@ sub build_cases {
     foreach my $combination (@combinations) {
         my @case_modifications;
         my @folder_parts = map { sanitize_name($_) } @$combination;
-        my $folder_name = join('__', @folder_parts);
+        my $folder_name = join('_', @folder_parts);
 
         die "Duplicate folder name generated: '$folder_name'. Please adjust new_lines.\n"
             if $seen_folder_names{$folder_name}++;
@@ -245,9 +317,7 @@ sub target_path_in_case {
     my ($case_dir, $source_path) = @_;
     my $canon_path = File::Spec->canonpath($source_path);
     my (undef, $dirs, $file) = File::Spec->splitpath($canon_path);
-    my @dirs = File::Spec->file_name_is_absolute($canon_path)
-        ? ()
-        : grep { length $_ && $_ ne '.' } File::Spec->splitdir($dirs);
+    my @dirs = grep { length $_ && $_ ne '.' } File::Spec->splitdir($dirs);
 
     return File::Spec->catfile($case_dir, @dirs, $file);
 }
@@ -256,6 +326,7 @@ sub validate_copy_files {
     my ($files_to_copy) = @_;
 
     foreach my $file (@$files_to_copy) {
+        ensure_relative_path($file, 'Static file');
         die "Static file '$file' does not exist.\n" unless -e $file;
         die "Static path '$file' is not a file.\n" unless -f $file;
     }
@@ -303,7 +374,7 @@ sub stage_case_folder {
         push @{$mods_by_file{$mod->{file}}}, $mod;
     }
 
-    foreach my $file (keys %$original_contents) {
+    foreach my $file (sort keys %$original_contents) {
         my $target_path = target_path_in_case($case_dir, $file);
         my $content = $original_contents->{$file};
 
@@ -330,6 +401,64 @@ sub list_case_directories {
     return @dirs;
 }
 
+sub run_commands_in_case {
+    my ($dir, $commands) = @_;
+    chdir $dir or die "Cannot enter directory: $dir";
+
+    foreach my $cmd (@$commands) {
+        my $exit_status = system($cmd);
+
+        if ($exit_status == -1) {
+            warn "In folder '$dir' failed to start command: $cmd ($!)\n";
+            return 1;
+        }
+
+        if ($exit_status & 127) {
+            my $signal = $exit_status & 127;
+            warn "In folder '$dir' command died with signal $signal: $cmd\n";
+            return 1;
+        }
+
+        my $code = $exit_status >> 8;
+        if ($code != 0) {
+            warn "In folder '$dir' command exited with code $code: $cmd\n";
+            return 1;
+        }
+
+        print "Successful in folder '$dir' execute command: $cmd\n";
+    }
+
+    return 0;
+}
+
+sub record_child_exit {
+    my ($pid, $status, $pid_to_dir, $failed_dirs) = @_;
+    my $dir = delete $pid_to_dir->{$pid} // "pid:$pid";
+
+    if ($status == -1) {
+        push @$failed_dirs, "$dir (wait failed)";
+        return;
+    }
+
+    if ($status & 127) {
+        push @$failed_dirs, "$dir (signal " . ($status & 127) . ")";
+        return;
+    }
+
+    my $code = $status >> 8;
+    push @$failed_dirs, "$dir (exit $code)" if $code != 0;
+}
+
+sub wait_for_child {
+    my ($pid_to_dir, $failed_dirs) = @_;
+    my $pid = wait();
+
+    die "wait() returned no child process unexpectedly.\n"
+        if $pid == -1;
+
+    record_child_exit($pid, $?, $pid_to_dir, $failed_dirs);
+}
+
 sub process_output_directories {
     my ($output_dir, $commands, $max_processes) = @_;
 
@@ -352,10 +481,12 @@ sub process_output_directories {
     }
 
     my $current_processes = 0;
+    my %pid_to_dir;
+    my @failed_dirs;
 
     foreach my $dir (@sub_dirs) {
         while ($current_processes >= $max_processes) {
-            wait();
+            wait_for_child(\%pid_to_dir, \@failed_dirs);
             $current_processes--;
         }
 
@@ -363,27 +494,23 @@ sub process_output_directories {
         if (!defined $pid) {
             die "Cannot generate subprogress: $!";
         } elsif ($pid == 0) {
-            chdir $dir or die "Cannot enter directory: $dir";
-
-            foreach my $cmd (@$commands) {
-                my $exit_status = system($cmd);
-                if ($exit_status != 0) {
-                    warn "In folder '$dir' encounter execution error: $cmd\n";
-                    last;
-                }
-
-                print "Successful in folder '$dir' execute command: $cmd\n";
-            }
-
-            exit 0;
+            my $failed = run_commands_in_case($dir, $commands);
+            exit($failed ? 1 : 0);
         } else {
+            $pid_to_dir{$pid} = $dir;
             $current_processes++;
         }
     }
 
     while ($current_processes > 0) {
-        wait();
+        wait_for_child(\%pid_to_dir, \@failed_dirs);
         $current_processes--;
+    }
+
+    if (@failed_dirs) {
+        die "Some case folders failed:\n"
+            . join("\n", map { " - $_" } @failed_dirs)
+            . "\n";
     }
 
     print "All check and execution done.\n";
@@ -393,8 +520,11 @@ sub main {
     my @normalized_modifications = normalize_modifications(\@modifications);
     my %original_contents = load_original_contents(\@normalized_modifications);
 
+    validate_commands(\@commands);
+    validate_command_tools(\@commands);
     validate_copy_files(\@files_to_copy);
     prepare_modifications(\@normalized_modifications, \%original_contents);
+    validate_modification_targets(\@normalized_modifications);
     recreate_output_directory($OUTPUT_DIR);
 
     my @cases = build_cases(\@normalized_modifications);
