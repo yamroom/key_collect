@@ -224,27 +224,65 @@ sub prepare_modifications {
     }
 }
 
+sub build_line_replacements {
+    my ($line, $mods, $file, $line_num) = @_;
+    my @replacements;
+
+    foreach my $mod (@$mods) {
+        my $start = index($line, $mod->{keyword});
+        die "Line $line_num in file '$file' no longer contains '$mod->{keyword}'.\n"
+            if $start < 0;
+
+        push @replacements, {
+            keyword     => $mod->{keyword},
+            replacement => exists $mod->{replacement_line} ? $mod->{replacement_line} : $mod->{keyword},
+            start       => $start,
+            end         => $start + length($mod->{keyword}),
+        };
+    }
+
+    @replacements = sort {
+        $a->{start} <=> $b->{start}
+            || $a->{end} <=> $b->{end}
+            || $a->{keyword} cmp $b->{keyword}
+    } @replacements;
+
+    for my $i (1 .. $#replacements) {
+        my $previous = $replacements[$i - 1];
+        my $current  = $replacements[$i];
+        next if $current->{start} >= $previous->{end};
+
+        die "Overlapping modifications target file '$file', line $line_num. "
+            . "Keywords '$previous->{keyword}' and '$current->{keyword}' share text on the same line, "
+            . "so please merge them into one edit or use more specific keywords.\n";
+    }
+
+    return @replacements;
+}
+
 sub validate_modification_targets {
-    my ($modifications) = @_;
+    my ($modifications, $original_contents) = @_;
     my %seen_targets;
-    my %seen_lines;
+    my %mods_by_file_line;
 
     foreach my $mod (@$modifications) {
         foreach my $line_num (@{$mod->{resolved_lines}}) {
             my $key = join "\0", $mod->{file}, $line_num, $mod->{keyword};
-            my $line_key = join "\0", $mod->{file}, $line_num;
 
             die "Duplicate modification target detected for file '$mod->{file}', line $line_num, keyword '$mod->{keyword}'.\n"
                 if $seen_targets{$key};
 
-            if (exists $seen_lines{$line_key}) {
-                my $previous_keyword = $seen_lines{$line_key};
-                die "Multiple modifications target file '$mod->{file}', line $line_num. "
-                    . "This is order-dependent ('$previous_keyword' and '$mod->{keyword}'), so please merge them into one edit or use different lines.\n";
-            }
-
             $seen_targets{$key} = 1;
-            $seen_lines{$line_key} = $mod->{keyword};
+            push @{$mods_by_file_line{$mod->{file}}{$line_num}}, $mod;
+        }
+    }
+
+    foreach my $file (sort keys %mods_by_file_line) {
+        my @lines = split /\n/, $original_contents->{$file}, -1;
+
+        foreach my $line_num (sort { $a <=> $b } keys %{$mods_by_file_line{$file}}) {
+            my $line = $lines[$line_num - 1];
+            build_line_replacements($line, $mods_by_file_line{$file}{$line_num}, $file, $line_num);
         }
     }
 }
@@ -299,15 +337,34 @@ sub build_cases {
 sub apply_modifications_to_content {
     my ($content, $modifications) = @_;
     my @lines = split /\n/, $content, -1;
+    my %mods_by_line;
 
     foreach my $mod (@$modifications) {
         foreach my $line_num (@{$mod->{resolved_lines}}) {
-            my $index = $line_num - 1;
-            die "Line $line_num in file '$mod->{file}' no longer contains '$mod->{keyword}'.\n"
-                unless $lines[$index] =~ /\Q$mod->{keyword}\E/;
-
-            $lines[$index] =~ s/\Q$mod->{keyword}\E/$mod->{replacement_line}/;
+            push @{$mods_by_line{$line_num}}, $mod;
         }
+    }
+
+    foreach my $line_num (sort { $a <=> $b } keys %mods_by_line) {
+        my $index = $line_num - 1;
+        my $line = $lines[$index];
+        my @replacements = build_line_replacements(
+            $line,
+            $mods_by_line{$line_num},
+            $mods_by_line{$line_num}[0]{file},
+            $line_num,
+        );
+        my $new_line = '';
+        my $cursor = 0;
+
+        foreach my $replacement (@replacements) {
+            $new_line .= substr($line, $cursor, $replacement->{start} - $cursor);
+            $new_line .= $replacement->{replacement};
+            $cursor = $replacement->{end};
+        }
+
+        $new_line .= substr($line, $cursor);
+        $lines[$index] = $new_line;
     }
 
     return join "\n", @lines;
@@ -524,7 +581,7 @@ sub main {
     validate_command_tools(\@commands);
     validate_copy_files(\@files_to_copy);
     prepare_modifications(\@normalized_modifications, \%original_contents);
-    validate_modification_targets(\@normalized_modifications);
+    validate_modification_targets(\@normalized_modifications, \%original_contents);
     recreate_output_directory($OUTPUT_DIR);
 
     my @cases = build_cases(\@normalized_modifications);
