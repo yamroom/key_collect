@@ -7,7 +7,7 @@ use Getopt::Long;
 
 my $path;
 my $keyword = '';
-my $output_params = 'B,C';
+my $output_params = '1-B,C';
 my $key_match = 'exact';
 my $current_dir = 0;
 
@@ -51,7 +51,7 @@ sub parse_line_value {
     return unless defined $line;
 
     $line =~ s/\r$//;
-    return unless $line =~ /^\s*(\w+)\s*[:=]\s*(.+?)\s*$/;
+    return unless $line =~ /^\s*([\w-]+)\s*[:=]\s*(.+?)\s*$/;
 
     my ($key, $raw_value) = ($1, $2);
     my $value = first_value($raw_value);
