@@ -105,6 +105,32 @@ sub matches_keyword {
     return $text =~ /\Q$needle\E/i;
 }
 
+sub natural_path_cmp {
+    my ($left, $right) = @_;
+
+    my @left_parts = ($left =~ /(\d+|\D+)/g);
+    my @right_parts = ($right =~ /(\d+|\D+)/g);
+    my $shared_length = @left_parts < @right_parts ? scalar @left_parts : scalar @right_parts;
+
+    foreach my $index (0 .. $shared_length - 1) {
+        my ($left_part, $right_part) = ($left_parts[$index], $right_parts[$index]);
+        my $cmp;
+
+        if ($left_part =~ /^\d+$/ && $right_part =~ /^\d+$/) {
+            $cmp = $left_part <=> $right_part;
+        } else {
+            $cmp = $left_part cmp $right_part;
+        }
+
+        return $cmp if $cmp;
+    }
+
+    my $remaining_cmp = scalar(@left_parts) <=> scalar(@right_parts);
+    return $remaining_cmp if $remaining_cmp;
+
+    return $left cmp $right;
+}
+
 sub read_files_in_dir {
     my ($dir) = @_;
     die "Directory '$dir' does not exist.\n" unless -d $dir;
@@ -124,7 +150,7 @@ sub read_files_in_dir {
         $dir,
     );
 
-    @all_files = sort @all_files;
+    @all_files = sort { natural_path_cmp($a, $b) } @all_files;
 
     my @raw_rows;
     foreach my $file_path (@all_files) {
