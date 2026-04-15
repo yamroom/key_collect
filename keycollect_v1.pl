@@ -108,15 +108,15 @@ sub matches_keyword {
 sub natural_path_cmp {
     my ($left, $right) = @_;
 
-    my @left_parts = ($left =~ /(\d+|\D+)/g);
-    my @right_parts = ($right =~ /(\d+|\D+)/g);
+    my @left_parts = ($left =~ /(\d+(?:\.\d+)?|\D+)/g);
+    my @right_parts = ($right =~ /(\d+(?:\.\d+)?|\D+)/g);
     my $shared_length = @left_parts < @right_parts ? scalar @left_parts : scalar @right_parts;
 
     foreach my $index (0 .. $shared_length - 1) {
         my ($left_part, $right_part) = ($left_parts[$index], $right_parts[$index]);
         my $cmp;
 
-        if ($left_part =~ /^\d+$/ && $right_part =~ /^\d+$/) {
+        if ($left_part =~ /^\d+(?:\.\d+)?$/ && $right_part =~ /^\d+(?:\.\d+)?$/) {
             $cmp = $left_part <=> $right_part;
         } else {
             $cmp = $left_part cmp $right_part;
@@ -156,9 +156,8 @@ sub read_files_in_dir {
     foreach my $file_path (@all_files) {
         my $occurrences_ref = read_file($file_path);
         next unless $occurrences_ref;
-        my $absolute_path = abs_path($file_path) // $file_path;
         push @raw_rows, {
-            File_Name   => $absolute_path,
+            File_Name   => $file_path,
             Occurrences => $occurrences_ref,
         };
     }
