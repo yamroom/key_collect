@@ -3,12 +3,16 @@ use warnings;
 use File::Copy qw(copy);
 use File::Path qw(make_path remove_tree);
 use File::Spec;
+use POSIX qw(:sys_wait_h setsid);
+use Time::HiRes qw(sleep time);
 
 # =========================
 # 使用者設定區
 # =========================
 my $OUTPUT_DIR    = 'output';
-my $MAX_PROCESSES = 10;
+my $MAX_PROCESSES = 10; # 最大平行數
+my $COMMAND_TIMEOUT_SEC = 10; # 允許 command 執行的最長秒數
+my $COMMAND_MAX_RETRIES = 3; # 超過允許秒數後的重試次數
 
 # 每個 case 都要一併放入 output 子資料夾的靜態檔案。
 # 如果 command 會用到額外輸入檔，例如 modelcard，請放在這裡。
@@ -458,12 +462,91 @@ sub list_case_directories {
     return @dirs;
 }
 
+sub run_command_once_with_timeout {
+    my ($cmd, $timeout_sec) = @_;
+
+    my $pid = fork();
+    if (!defined $pid) {
+        return { start_failed => 1, error => $! };
+    }
+
+    if ($pid == 0) {
+        setsid() or die "Cannot start process group for command '$cmd': $!\n";
+        exec('sh', '-c', $cmd);
+        die "Cannot execute command '$cmd': $!\n";
+    }
+
+    my $deadline = time() + $timeout_sec;
+    while (1) {
+        my $done = waitpid($pid, WNOHANG);
+        if ($done == $pid) {
+            return { status => $? };
+        }
+
+        die "waitpid failed for command '$cmd'.\n"
+            if $done == -1;
+
+        last if time() >= $deadline;
+
+        my $remaining = $deadline - time();
+        sleep($remaining < 0.1 ? $remaining : 0.1) if $remaining > 0;
+    }
+
+    my $done = waitpid($pid, WNOHANG);
+    if ($done == $pid) {
+        return { status => $? };
+    }
+
+    kill 'TERM', -$pid;
+    sleep 1;
+    kill 'KILL', -$pid;
+    waitpid($pid, 0);
+
+    return { timed_out => 1 };
+}
+
+sub run_command_with_timeout_retry {
+    my ($dir, $cmd, $timeout_sec, $max_retries) = @_;
+    my $max_attempts = 1 + $max_retries;
+
+    for my $attempt (1 .. $max_attempts) {
+        my $result = run_command_once_with_timeout($cmd, $timeout_sec);
+
+        return $result if $result->{start_failed};
+        return $result unless $result->{timed_out};
+
+        warn "In folder '$dir' command timed out after ${timeout_sec}s "
+            . "on attempt $attempt/$max_attempts: $cmd\n";
+    }
+
+    return { timed_out => 1, attempts => $max_attempts };
+}
+
 sub run_commands_in_case {
     my ($dir, $commands) = @_;
     chdir $dir or die "Cannot enter directory: $dir";
 
     foreach my $cmd (@$commands) {
-        my $exit_status = system($cmd);
+        my $result = run_command_with_timeout_retry(
+            $dir,
+            $cmd,
+            $COMMAND_TIMEOUT_SEC,
+            $COMMAND_MAX_RETRIES,
+        );
+
+        if ($result->{timed_out}) {
+            warn "In folder '$dir' command timed out after "
+                . ($result->{attempts} // (1 + $COMMAND_MAX_RETRIES))
+                . " attempt(s): $cmd\n";
+            return 1;
+        }
+
+        if ($result->{start_failed}) {
+            warn "In folder '$dir' failed to start command: $cmd ($result->{error})\n";
+            return 1;
+        }
+
+        my $exit_status = $result->{status};
 
         if ($exit_status == -1) {
             warn "In folder '$dir' failed to start command: $cmd ($!)\n";
