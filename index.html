@@ -1,0 +1,1447 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>CSV 電性資料繪圖 Dashboard</title>
+  <script src="https://cdn.plot.ly/plotly-3.4.0.min.js" charset="utf-8"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js" referrerpolicy="no-referrer"></script>
+  <style>
+    :root {
+      color-scheme: light;
+      --bg: #f4f7fb;
+      --panel: #ffffff;
+      --panel-soft: #f8fafc;
+      --ink: #172033;
+      --muted: #64748b;
+      --line: #d8e0ea;
+      --line-strong: #b8c4d4;
+      --accent: #0f766e;
+      --accent-strong: #115e59;
+      --accent-soft: #d9f4ef;
+      --danger: #b42318;
+      --warning: #9a6700;
+      --shadow: 0 18px 48px rgba(15, 23, 42, 0.08);
+      --radius: 8px;
+      font-family: Inter, "Segoe UI", "Noto Sans TC", "Microsoft JhengHei", Arial, sans-serif;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      min-height: 100vh;
+      overflow-x: hidden;
+      background:
+        linear-gradient(180deg, #eef4fb 0%, #f7f9fc 42%, #eef2f7 100%);
+      color: var(--ink);
+    }
+
+    button,
+    input,
+    select {
+      font: inherit;
+    }
+
+    button {
+      border: 1px solid transparent;
+      border-radius: 7px;
+      cursor: pointer;
+      transition: background 140ms ease, border-color 140ms ease, transform 140ms ease;
+    }
+
+    button:disabled {
+      cursor: not-allowed;
+      opacity: 0.55;
+    }
+
+    button:not(:disabled):active {
+      transform: translateY(1px);
+    }
+
+    .app-shell {
+      width: calc(100% - 32px);
+      max-width: 1480px;
+      margin: 0 auto;
+      padding: 28px 0 44px;
+    }
+
+    .topbar {
+      display: flex;
+      align-items: end;
+      justify-content: space-between;
+      gap: 24px;
+      margin-bottom: 22px;
+    }
+
+    .title-block h1 {
+      margin: 0 0 6px;
+      font-size: clamp(26px, 3vw, 40px);
+      line-height: 1.05;
+      letter-spacing: 0;
+      overflow-wrap: anywhere;
+    }
+
+    .title-block p {
+      margin: 0;
+      color: var(--muted);
+      font-size: 15px;
+      line-height: 1.55;
+      overflow-wrap: anywhere;
+    }
+
+    .status-pill {
+      flex: 0 0 auto;
+      display: inline-flex;
+      align-items: center;
+      min-height: 34px;
+      padding: 6px 12px;
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      background: rgba(255, 255, 255, 0.75);
+      color: var(--muted);
+      font-size: 13px;
+      white-space: nowrap;
+    }
+
+    .workspace {
+      display: grid;
+      grid-template-columns: minmax(300px, 360px) minmax(0, 1fr);
+      gap: 18px;
+      align-items: start;
+      min-width: 0;
+    }
+
+    .sidebar,
+    .chart-card {
+      min-width: 0;
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      background: rgba(255, 255, 255, 0.94);
+      box-shadow: var(--shadow);
+    }
+
+    .sidebar {
+      position: sticky;
+      top: 18px;
+      overflow: hidden;
+    }
+
+    .panel {
+      padding: 18px;
+      border-bottom: 1px solid var(--line);
+    }
+
+    .panel:last-child {
+      border-bottom: 0;
+    }
+
+    .panel-title {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      margin-bottom: 12px;
+    }
+
+    .panel-title h2 {
+      margin: 0;
+      font-size: 15px;
+      letter-spacing: 0;
+    }
+
+    .file-drop {
+      position: relative;
+      display: grid;
+      gap: 10px;
+      min-height: 132px;
+      place-items: center;
+      padding: 20px;
+      overflow: hidden;
+      border: 1.5px dashed var(--line-strong);
+      border-radius: var(--radius);
+      background: var(--panel-soft);
+      text-align: center;
+    }
+
+    .file-drop strong {
+      display: block;
+      font-size: 15px;
+    }
+
+    .file-drop span {
+      display: block;
+      max-width: 100%;
+      overflow-wrap: anywhere;
+      color: var(--muted);
+      font-size: 13px;
+      line-height: 1.45;
+    }
+
+    .file-drop input[type="file"] {
+      position: absolute;
+      inset: 0;
+      width: 100%;
+      height: 100%;
+      opacity: 0;
+      cursor: pointer;
+    }
+
+    .metrics {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 10px;
+      margin-top: 14px;
+    }
+
+    .metric {
+      min-width: 0;
+      padding: 10px;
+      border: 1px solid var(--line);
+      border-radius: 7px;
+      background: #fff;
+    }
+
+    .metric span {
+      display: block;
+      color: var(--muted);
+      font-size: 12px;
+      line-height: 1.3;
+    }
+
+    .metric strong {
+      display: block;
+      margin-top: 4px;
+      overflow: hidden;
+      color: var(--ink);
+      font-size: 18px;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .field-list {
+      display: grid;
+      gap: 8px;
+      margin: 0;
+      padding: 0;
+      list-style: none;
+    }
+
+    .field-chip {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      min-height: 34px;
+      padding: 7px 9px;
+      border: 1px solid var(--line);
+      border-radius: 7px;
+      background: #fff;
+      font-size: 13px;
+    }
+
+    .field-chip b {
+      min-width: 0;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .field-chip span {
+      flex: 0 0 auto;
+      color: var(--muted);
+      font-size: 12px;
+    }
+
+    .primary-button,
+    .secondary-button,
+    .ghost-button,
+    .danger-button {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      min-height: 36px;
+      padding: 7px 12px;
+      font-weight: 650;
+      font-size: 13px;
+    }
+
+    .primary-button {
+      width: 100%;
+      background: var(--accent);
+      color: #fff;
+    }
+
+    .primary-button:hover:not(:disabled) {
+      background: var(--accent-strong);
+    }
+
+    .secondary-button {
+      border-color: var(--line-strong);
+      background: #fff;
+      color: var(--ink);
+    }
+
+    .secondary-button:hover:not(:disabled),
+    .ghost-button:hover:not(:disabled) {
+      border-color: var(--accent);
+      background: var(--accent-soft);
+    }
+
+    .ghost-button {
+      border-color: var(--line);
+      background: transparent;
+      color: var(--ink);
+    }
+
+    .danger-button {
+      border-color: #f0b8b2;
+      background: #fff;
+      color: var(--danger);
+    }
+
+    .danger-button:hover:not(:disabled) {
+      background: #fff0ee;
+    }
+
+    .notice {
+      display: none;
+      margin-top: 12px;
+      padding: 10px 11px;
+      border: 1px solid var(--line);
+      border-radius: 7px;
+      background: #fff;
+      color: var(--muted);
+      font-size: 13px;
+      line-height: 1.45;
+      overflow-wrap: anywhere;
+    }
+
+    .notice.is-visible {
+      display: block;
+    }
+
+    .notice.warning {
+      border-color: #f1d18a;
+      background: #fff8e6;
+      color: var(--warning);
+    }
+
+    .notice.error {
+      border-color: #f3b8b0;
+      background: #fff1ef;
+      color: var(--danger);
+    }
+
+    .dashboard {
+      display: grid;
+      gap: 18px;
+      min-width: 0;
+    }
+
+    .empty-state {
+      display: grid;
+      min-width: 0;
+      min-height: 440px;
+      place-items: center;
+      padding: 36px;
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      background: rgba(255, 255, 255, 0.75);
+      color: var(--muted);
+      text-align: center;
+    }
+
+    .empty-state strong {
+      display: block;
+      margin-bottom: 8px;
+      color: var(--ink);
+      font-size: 18px;
+    }
+
+    .empty-state p {
+      max-width: 460px;
+      margin: 0;
+      line-height: 1.65;
+    }
+
+    .chart-card {
+      min-width: 0;
+      overflow: hidden;
+    }
+
+    .chart-header {
+      display: grid;
+      grid-template-columns: minmax(220px, 1fr) auto;
+      gap: 14px;
+      align-items: start;
+      padding: 14px 16px;
+      border-bottom: 1px solid var(--line);
+      background: #fff;
+    }
+
+    .title-editor,
+    .axis-grid {
+      display: grid;
+      gap: 7px;
+      min-width: 0;
+    }
+
+    .title-editor label,
+    .axis-grid label {
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 700;
+    }
+
+    .chart-title-input,
+    .axis-input {
+      width: 100%;
+      min-height: 38px;
+      padding: 7px 10px;
+      border: 1px solid var(--line-strong);
+      border-radius: 7px;
+      color: var(--ink);
+    }
+
+    .chart-title-input {
+      font-weight: 700;
+    }
+
+    .chart-actions {
+      display: flex;
+      flex-wrap: wrap;
+      justify-content: flex-end;
+      gap: 8px;
+    }
+
+    .chart-actions .primary-button {
+      width: auto;
+    }
+
+    .chart-body {
+      display: grid;
+      grid-template-columns: minmax(230px, 290px) minmax(0, 1fr);
+      gap: 0;
+      min-height: 520px;
+    }
+
+    .chart-settings {
+      padding: 14px;
+      border-right: 1px solid var(--line);
+      background: var(--panel-soft);
+    }
+
+    .control-group {
+      margin-bottom: 15px;
+    }
+
+    .control-group:last-child {
+      margin-bottom: 0;
+    }
+
+    .control-group label,
+    .control-group legend {
+      display: block;
+      margin-bottom: 7px;
+      color: var(--ink);
+      font-size: 13px;
+      font-weight: 700;
+    }
+
+    .control-group select {
+      width: 100%;
+      min-height: 36px;
+      padding: 6px 9px;
+      border: 1px solid var(--line-strong);
+      border-radius: 7px;
+      background: #fff;
+      color: var(--ink);
+    }
+
+    .series-row {
+      display: grid;
+      grid-template-columns: 18px minmax(0, 1fr) 68px;
+      gap: 8px;
+      align-items: center;
+      min-height: 36px;
+      padding: 5px 7px;
+      border: 1px solid var(--line);
+      border-radius: 7px;
+      background: #fff;
+      font-size: 13px;
+    }
+
+    .series-row span {
+      min-width: 0;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .series-row select {
+      min-height: 28px;
+      padding: 3px 6px;
+      border: 1px solid var(--line-strong);
+      border-radius: 6px;
+      background: #fff;
+      color: var(--ink);
+      font-size: 12px;
+    }
+
+    fieldset {
+      min-width: 0;
+      margin: 0;
+      padding: 0;
+      border: 0;
+    }
+
+    .checkbox-list {
+      display: grid;
+      gap: 7px;
+      max-height: 220px;
+      overflow: auto;
+      padding-right: 2px;
+    }
+
+    .check-row {
+      display: grid;
+      grid-template-columns: 18px minmax(0, 1fr);
+      gap: 8px;
+      align-items: center;
+      min-height: 30px;
+      padding: 5px 7px;
+      border: 1px solid var(--line);
+      border-radius: 7px;
+      background: #fff;
+      font-size: 13px;
+    }
+
+    .check-row span {
+      min-width: 0;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .toggle-row {
+      display: grid;
+      gap: 8px;
+    }
+
+    .plot-host {
+      min-width: 0;
+      min-height: 520px;
+      background: #fff;
+    }
+
+    .chart-warning {
+      display: none;
+      margin: 0 14px 14px;
+      padding: 9px 11px;
+      border: 1px solid #f1d18a;
+      border-radius: 7px;
+      background: #fff8e6;
+      color: var(--warning);
+      font-size: 13px;
+      line-height: 1.45;
+    }
+
+    .chart-warning.is-visible {
+      display: block;
+    }
+
+    .fine-print {
+      margin-top: 10px;
+      color: var(--muted);
+      font-size: 12px;
+      line-height: 1.5;
+    }
+
+    @media (max-width: 1180px) {
+      .topbar {
+        display: grid;
+        align-items: start;
+        gap: 16px;
+      }
+
+      .status-pill {
+        justify-self: start;
+        white-space: normal;
+      }
+
+      .workspace {
+        grid-template-columns: 1fr;
+      }
+
+      .sidebar {
+        width: 100%;
+      }
+
+      .sidebar {
+        position: static;
+      }
+
+      .chart-body {
+        grid-template-columns: 1fr;
+      }
+
+      .chart-settings {
+        border-right: 0;
+        border-bottom: 1px solid var(--line);
+      }
+    }
+
+    @media (max-width: 640px) {
+      .app-shell {
+        width: calc(100% - 20px);
+        max-width: 1480px;
+        padding-top: 18px;
+      }
+
+      .chart-header {
+        grid-template-columns: 1fr;
+      }
+
+      .chart-actions {
+        justify-content: stretch;
+      }
+
+      .chart-actions button {
+        flex: 1 1 auto;
+      }
+
+      .metrics {
+        grid-template-columns: 1fr;
+      }
+
+      .plot-host {
+        min-height: 430px;
+      }
+    }
+  </style>
+</head>
+<body>
+  <main class="app-shell">
+    <header class="topbar">
+      <div class="title-block">
+        <h1>CSV 電性資料繪圖 Dashboard</h1>
+        <p>讀取本機 CSV，第一欄作為 X 軸，其餘欄位作為可選 Y 曲線。資料只在瀏覽器端解析。</p>
+      </div>
+      <div class="status-pill" id="libraryStatus">等待套件載入</div>
+    </header>
+
+    <section class="workspace">
+      <aside class="sidebar" aria-label="資料與控制面板">
+        <section class="panel">
+          <div class="panel-title">
+            <h2>匯入 CSV</h2>
+          </div>
+          <label class="file-drop" for="csvFile">
+            <span>
+              <strong>選擇或拖放 CSV 檔案</strong>
+              <span id="fileName">尚未選擇檔案</span>
+            </span>
+            <input id="csvFile" type="file" accept=".csv,text/csv">
+          </label>
+          <div class="metrics" aria-live="polite">
+            <div class="metric">
+              <span>有效資料列</span>
+              <strong id="rowCount">0</strong>
+            </div>
+            <div class="metric">
+              <span>欄位數</span>
+              <strong id="columnCount">0</strong>
+            </div>
+            <div class="metric">
+              <span>Y 序列</span>
+              <strong id="seriesCount">0</strong>
+            </div>
+            <div class="metric">
+              <span>排除列</span>
+              <strong id="excludedCount">0</strong>
+            </div>
+          </div>
+          <div id="parseNotice" class="notice" role="status"></div>
+        </section>
+
+        <section class="panel">
+          <div class="panel-title">
+            <h2>欄位摘要</h2>
+          </div>
+          <ul class="field-list" id="fieldList">
+            <li class="field-chip"><b>尚無欄位</b><span>請先匯入</span></li>
+          </ul>
+        </section>
+
+        <section class="panel">
+          <div class="panel-title">
+            <h2>圖表控制</h2>
+          </div>
+          <button class="primary-button" id="addChart" type="button" disabled>新增圖表</button>
+          <p class="fine-print">匯入後會自動建立第一張圖。每張圖可以獨立選擇曲線、圖形模式與 log 軸。</p>
+        </section>
+      </aside>
+
+      <section class="dashboard" id="dashboard" aria-label="圖表 Dashboard">
+        <div class="empty-state">
+          <div>
+            <strong>尚未載入資料</strong>
+            <p>請匯入 CSV。第一列會被視為欄名，第一欄會作為 X 軸，其餘欄位會成為可繪製的 Y 序列。</p>
+          </div>
+        </div>
+      </section>
+    </section>
+  </main>
+
+  <script>
+    const state = {
+      dataset: null,
+      charts: [],
+      chartSequence: 1
+    };
+
+    const colorway = [
+      "#0f766e", "#2563eb", "#c2410c", "#7c3aed", "#be123c",
+      "#15803d", "#a16207", "#0891b2", "#4338ca", "#db2777",
+      "#4d7c0f", "#ea580c"
+    ];
+
+    const els = {
+      fileInput: document.getElementById("csvFile"),
+      fileName: document.getElementById("fileName"),
+      rowCount: document.getElementById("rowCount"),
+      columnCount: document.getElementById("columnCount"),
+      seriesCount: document.getElementById("seriesCount"),
+      excludedCount: document.getElementById("excludedCount"),
+      parseNotice: document.getElementById("parseNotice"),
+      fieldList: document.getElementById("fieldList"),
+      addChart: document.getElementById("addChart"),
+      dashboard: document.getElementById("dashboard"),
+      libraryStatus: document.getElementById("libraryStatus")
+    };
+
+    function setLibraryStatus() {
+      const hasPlotly = typeof window.Plotly !== "undefined";
+      const hasPapa = typeof window.Papa !== "undefined";
+
+      if (hasPlotly && hasPapa) {
+        els.libraryStatus.textContent = "Plotly / PapaParse 已載入";
+        return;
+      }
+
+      els.libraryStatus.textContent = "CDN 套件尚未載入，請確認網路連線";
+      showNotice("無法載入 Plotly 或 PapaParse。此 HTML 使用 CDN，因此需要網路才能解析與繪圖。", "error");
+    }
+
+    function normalizeHeader(rawHeader) {
+      const seen = new Map();
+      return rawHeader.map((value, index) => {
+        const fallback = `Column ${index + 1}`;
+        const base = String(value ?? "").trim() || fallback;
+        const count = seen.get(base) || 0;
+        seen.set(base, count + 1);
+        return count === 0 ? base : `${base} (${count + 1})`;
+      });
+    }
+
+    function parseNumeric(value) {
+      if (value === null || value === undefined) {
+        return null;
+      }
+
+      const text = String(value).trim();
+      if (text === "") {
+        return null;
+      }
+
+      const normalized = text.replace(/,/g, "");
+      const number = Number(normalized);
+      return Number.isFinite(number) ? number : null;
+    }
+
+    function showNotice(message, type = "") {
+      els.parseNotice.textContent = message;
+      els.parseNotice.className = `notice is-visible${type ? ` ${type}` : ""}`;
+    }
+
+    function hideNotice() {
+      els.parseNotice.textContent = "";
+      els.parseNotice.className = "notice";
+    }
+
+    function setMetricValues(dataset) {
+      els.rowCount.textContent = dataset ? dataset.rows.length.toLocaleString() : "0";
+      els.columnCount.textContent = dataset ? dataset.headers.length.toLocaleString() : "0";
+      els.seriesCount.textContent = dataset ? dataset.yHeaders.length.toLocaleString() : "0";
+      els.excludedCount.textContent = dataset ? dataset.excludedRows.toLocaleString() : "0";
+    }
+
+    function renderFieldSummary() {
+      els.fieldList.innerHTML = "";
+
+      if (!state.dataset) {
+        const empty = document.createElement("li");
+        empty.className = "field-chip";
+        empty.innerHTML = "<b>尚無欄位</b><span>請先匯入</span>";
+        els.fieldList.appendChild(empty);
+        return;
+      }
+
+      const xItem = document.createElement("li");
+      xItem.className = "field-chip";
+      xItem.innerHTML = `<b>${escapeHtml(state.dataset.xHeader)}</b><span>X 軸</span>`;
+      els.fieldList.appendChild(xItem);
+
+      state.dataset.yHeaders.forEach((name, index) => {
+        const item = document.createElement("li");
+        item.className = "field-chip";
+        item.innerHTML = `<b>${escapeHtml(name)}</b><span>Y${index + 1}</span>`;
+        els.fieldList.appendChild(item);
+      });
+    }
+
+    function escapeHtml(value) {
+      return String(value)
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;")
+        .replace(/'/g, "&#039;");
+    }
+
+    function buildDataset(parseResult, fileName) {
+      const rows = parseResult.data.filter(row => Array.isArray(row) && row.some(cell => String(cell ?? "").trim() !== ""));
+      if (rows.length < 2) {
+        throw new Error("CSV 至少需要一列欄名與一列資料。");
+      }
+
+      const headers = normalizeHeader(rows[0]);
+      if (headers.length < 2) {
+        throw new Error("CSV 至少需要兩欄：第一欄 X，第二欄起為 Y。");
+      }
+
+      const normalizedRows = [];
+      let excludedRows = 0;
+      let invalidCellCount = 0;
+
+      rows.slice(1).forEach((rawRow) => {
+        const x = parseNumeric(rawRow[0]);
+        const yValues = headers.slice(1).map((_, yIndex) => parseNumeric(rawRow[yIndex + 1]));
+        const hasAnyY = yValues.some(value => value !== null);
+
+        if (x === null || !hasAnyY) {
+          excludedRows += 1;
+          return;
+        }
+
+        invalidCellCount += yValues.filter(value => value === null).length;
+        normalizedRows.push({ x, y: yValues });
+      });
+
+      if (normalizedRows.length === 0) {
+        throw new Error("找不到可繪製的數值資料列。請確認第一欄與至少一個 Y 欄位是數值。");
+      }
+
+      return {
+        fileName,
+        headers,
+        xHeader: headers[0],
+        yHeaders: headers.slice(1),
+        rows: normalizedRows,
+        excludedRows,
+        invalidCellCount,
+        parseErrors: parseResult.errors || []
+      };
+    }
+
+    function resetChartsForDataset() {
+      state.charts = [];
+      state.chartSequence = 1;
+      addChart("圖表 1", state.dataset.yHeaders.map((_, index) => index));
+    }
+
+    function getDefaultYAxisTitle() {
+      return state.dataset.yHeaders.length === 1 ? state.dataset.yHeaders[0] : "Y";
+    }
+
+    function createAxisAssignments() {
+      return Object.fromEntries(state.dataset.yHeaders.map((_, index) => [index, "y"]));
+    }
+
+    function addChart(title, selectedY) {
+      if (!state.dataset) {
+        return;
+      }
+
+      const id = `chart-${Date.now()}-${state.chartSequence}`;
+      const chart = {
+        id,
+        title: title || `圖表 ${state.chartSequence}`,
+        xAxisTitle: state.dataset.xHeader,
+        yAxisTitle: getDefaultYAxisTitle(),
+        pAxisTitle: "P",
+        selectedY: selectedY && selectedY.length ? selectedY : state.dataset.yHeaders.map((_, index) => index),
+        axisAssignments: createAxisAssignments(),
+        mode: "lines",
+        xLog: false,
+        yLog: false,
+        pLog: false
+      };
+
+      state.chartSequence += 1;
+      state.charts.push(chart);
+      renderDashboard();
+    }
+
+    function createChartCard(chart) {
+      const card = document.createElement("article");
+      card.className = "chart-card";
+      card.dataset.chartId = chart.id;
+
+      const checkboxes = state.dataset.yHeaders.map((name, index) => {
+        const checked = chart.selectedY.includes(index) ? "checked" : "";
+        const axis = chart.axisAssignments[index] === "p" ? "p" : "y";
+        return `
+          <label class="series-row" title="${escapeHtml(name)}">
+            <input type="checkbox" data-action="toggle-y" data-y-index="${index}" ${checked}>
+            <span>${escapeHtml(name)}</span>
+            <select data-action="axis-choice" data-y-index="${index}" aria-label="${escapeHtml(name)} 座標軸">
+              <option value="y" ${axis === "y" ? "selected" : ""}>Y</option>
+              <option value="p" ${axis === "p" ? "selected" : ""}>P</option>
+            </select>
+          </label>
+        `;
+      }).join("");
+
+      card.innerHTML = `
+        <div class="chart-header">
+          <div class="title-editor">
+            <label for="${chart.id}-title">Title</label>
+            <input id="${chart.id}-title" class="chart-title-input" data-action="title" value="${escapeHtml(chart.title)}" aria-label="圖表標題">
+          </div>
+          <div class="chart-actions">
+            <button class="primary-button" type="button" data-action="download">下載 PNG</button>
+            <button class="secondary-button" type="button" data-action="reset-zoom">重設縮放</button>
+            <button class="secondary-button" type="button" data-action="suggest-axis">自動建議軸</button>
+            <button class="secondary-button" type="button" data-action="select-all">全選</button>
+            <button class="ghost-button" type="button" data-action="clear-all">清空</button>
+            <button class="danger-button" type="button" data-action="delete">刪除</button>
+          </div>
+        </div>
+        <div class="chart-body">
+          <aside class="chart-settings">
+            <div class="control-group">
+              <label for="${chart.id}-mode">圖表模式</label>
+              <select id="${chart.id}-mode" data-action="mode">
+                <option value="lines" ${chart.mode === "lines" ? "selected" : ""}>線圖</option>
+                <option value="markers" ${chart.mode === "markers" ? "selected" : ""}>散點</option>
+                <option value="lines+markers" ${chart.mode === "lines+markers" ? "selected" : ""}>線加點</option>
+              </select>
+            </div>
+            <div class="control-group axis-grid">
+              <label for="${chart.id}-x-axis">X 軸名稱</label>
+              <input id="${chart.id}-x-axis" class="axis-input" data-action="x-axis-title" value="${escapeHtml(chart.xAxisTitle)}">
+            </div>
+            <div class="control-group axis-grid">
+              <label for="${chart.id}-y-axis">Y 軸名稱</label>
+              <input id="${chart.id}-y-axis" class="axis-input" data-action="y-axis-title" value="${escapeHtml(chart.yAxisTitle)}">
+            </div>
+            <div class="control-group axis-grid">
+              <label for="${chart.id}-p-axis">P 軸名稱</label>
+              <input id="${chart.id}-p-axis" class="axis-input" data-action="p-axis-title" value="${escapeHtml(chart.pAxisTitle)}">
+            </div>
+            <fieldset class="control-group">
+              <legend>Y 序列與座標軸</legend>
+              <div class="checkbox-list">${checkboxes}</div>
+            </fieldset>
+            <fieldset class="control-group">
+              <legend>座標軸</legend>
+              <div class="toggle-row">
+                <label class="check-row">
+                  <input type="checkbox" data-action="x-log" ${chart.xLog ? "checked" : ""}>
+                  <span>X 軸 log scale</span>
+                </label>
+                <label class="check-row">
+                  <input type="checkbox" data-action="y-log" ${chart.yLog ? "checked" : ""}>
+                  <span>Y 軸 log scale</span>
+                </label>
+                <label class="check-row">
+                  <input type="checkbox" data-action="p-log" ${chart.pLog ? "checked" : ""}>
+                  <span>P 軸 log scale</span>
+                </label>
+              </div>
+            </fieldset>
+          </aside>
+          <div>
+            <div class="plot-host" id="${chart.id}-plot"></div>
+            <div class="chart-warning" id="${chart.id}-warning"></div>
+          </div>
+        </div>
+      `;
+
+      card.addEventListener("input", handleChartInput);
+      card.addEventListener("change", handleChartInput);
+      card.addEventListener("click", handleChartClick);
+      return card;
+    }
+
+    function renderDashboard() {
+      els.dashboard.innerHTML = "";
+
+      if (!state.dataset) {
+        els.dashboard.innerHTML = `
+          <div class="empty-state">
+            <div>
+              <strong>尚未載入資料</strong>
+              <p>請匯入 CSV。第一列會被視為欄名，第一欄會作為 X 軸，其餘欄位會成為可繪製的 Y 序列。</p>
+            </div>
+          </div>
+        `;
+        return;
+      }
+
+      if (state.charts.length === 0) {
+        els.dashboard.innerHTML = `
+          <div class="empty-state">
+            <div>
+              <strong>目前沒有圖表</strong>
+              <p>使用左側的新增圖表按鈕建立一張新圖。</p>
+            </div>
+          </div>
+        `;
+        return;
+      }
+
+      state.charts.forEach(chart => {
+        els.dashboard.appendChild(createChartCard(chart));
+      });
+
+      state.charts.forEach(renderPlot);
+    }
+
+    function getChartFromEvent(event) {
+      const card = event.target.closest(".chart-card");
+      if (!card) {
+        return null;
+      }
+
+      return state.charts.find(chart => chart.id === card.dataset.chartId) || null;
+    }
+
+    function handleChartInput(event) {
+      const chart = getChartFromEvent(event);
+      if (!chart) {
+        return;
+      }
+
+      const action = event.target.dataset.action;
+      if (action === "title") {
+        chart.title = event.target.value.trim() || "未命名圖表";
+        renderPlot(chart);
+        return;
+      }
+
+      if (action === "x-axis-title") {
+        chart.xAxisTitle = event.target.value.trim() || state.dataset.xHeader;
+        renderPlot(chart);
+        return;
+      }
+
+      if (action === "y-axis-title") {
+        chart.yAxisTitle = event.target.value.trim() || getDefaultYAxisTitle();
+        renderPlot(chart);
+        return;
+      }
+
+      if (action === "p-axis-title") {
+        chart.pAxisTitle = event.target.value.trim() || "P";
+        renderPlot(chart);
+        return;
+      }
+
+      if (action === "mode") {
+        chart.mode = event.target.value;
+        renderPlot(chart);
+        return;
+      }
+
+      if (action === "toggle-y") {
+        const index = Number(event.target.dataset.yIndex);
+        if (event.target.checked && !chart.selectedY.includes(index)) {
+          chart.selectedY.push(index);
+          chart.selectedY.sort((a, b) => a - b);
+        }
+
+        if (!event.target.checked) {
+          chart.selectedY = chart.selectedY.filter(item => item !== index);
+        }
+
+        renderPlot(chart);
+        return;
+      }
+
+      if (action === "axis-choice") {
+        const index = Number(event.target.dataset.yIndex);
+        chart.axisAssignments[index] = event.target.value === "p" ? "p" : "y";
+        renderPlot(chart);
+        return;
+      }
+
+      if (action === "x-log") {
+        chart.xLog = event.target.checked;
+        renderPlot(chart);
+        return;
+      }
+
+      if (action === "y-log") {
+        chart.yLog = event.target.checked;
+        renderPlot(chart);
+        return;
+      }
+
+      if (action === "p-log") {
+        chart.pLog = event.target.checked;
+        renderPlot(chart);
+      }
+    }
+
+    function handleChartClick(event) {
+      const chart = getChartFromEvent(event);
+      if (!chart) {
+        return;
+      }
+
+      const action = event.target.dataset.action;
+      if (action === "delete") {
+        state.charts = state.charts.filter(item => item.id !== chart.id);
+        renderDashboard();
+        return;
+      }
+
+      if (action === "download") {
+        downloadChart(chart);
+        return;
+      }
+
+      if (action === "reset-zoom") {
+        resetChartZoom(chart);
+        return;
+      }
+
+      if (action === "suggest-axis") {
+        suggestPAxis(chart);
+        renderDashboard();
+        return;
+      }
+
+      if (action === "select-all") {
+        chart.selectedY = state.dataset.yHeaders.map((_, index) => index);
+        renderDashboard();
+        return;
+      }
+
+      if (action === "clear-all") {
+        chart.selectedY = [];
+        renderDashboard();
+      }
+    }
+
+    function sanitizeFilename(value) {
+      return String(value || "csv-chart")
+        .replace(/[<>:"/\\|?*\x00-\x1f]/g, "_")
+        .replace(/\s+/g, "_")
+        .replace(/_+/g, "_")
+        .replace(/^_+|_+$/g, "")
+        .slice(0, 120) || "csv-chart";
+    }
+
+    function getDownloadFilename(chart) {
+      const baseName = state.dataset.fileName.replace(/\.[^.]+$/, "");
+      return sanitizeFilename(`${baseName}_${chart.title || "chart"}`);
+    }
+
+    function downloadChart(chart) {
+      const plotEl = document.getElementById(`${chart.id}-plot`);
+      if (!plotEl || typeof window.Plotly === "undefined") {
+        return;
+      }
+
+      Plotly.downloadImage(plotEl, {
+        format: "png",
+        width: 1400,
+        height: 900,
+        scale: 2,
+        filename: getDownloadFilename(chart)
+      });
+    }
+
+    function resetChartZoom(chart) {
+      const plotEl = document.getElementById(`${chart.id}-plot`);
+      if (!plotEl || typeof window.Plotly === "undefined") {
+        return;
+      }
+
+      Plotly.relayout(plotEl, {
+        "xaxis.autorange": true,
+        "yaxis.autorange": true,
+        "yaxis2.autorange": true
+      });
+    }
+
+    function shouldUsePAxis(header) {
+      return /(^p(_|$)|power|phase|deg|watt|_w$|\(w\))/i.test(header);
+    }
+
+    function suggestPAxis(chart) {
+      state.dataset.yHeaders.forEach((header, index) => {
+        chart.axisAssignments[index] = shouldUsePAxis(header) ? "p" : "y";
+      });
+    }
+
+    function buildTrace(chart, yIndex) {
+      const xValues = [];
+      const yValues = [];
+
+      state.dataset.rows.forEach(row => {
+        const y = row.y[yIndex];
+        if (y !== null) {
+          xValues.push(row.x);
+          yValues.push(y);
+        }
+      });
+
+      return {
+        x: xValues,
+        y: yValues,
+        type: "scatter",
+        mode: chart.mode,
+        name: state.dataset.yHeaders[yIndex],
+        yaxis: chart.axisAssignments[yIndex] === "p" ? "y2" : "y",
+        line: { width: 2 },
+        marker: { size: chart.mode === "markers" ? 7 : 5 }
+      };
+    }
+
+    function axisCanUseLog(values) {
+      return values.length > 0 && values.every(value => Number.isFinite(value) && value > 0);
+    }
+
+    function renderPlot(chart) {
+      const plotEl = document.getElementById(`${chart.id}-plot`);
+      const warningEl = document.getElementById(`${chart.id}-warning`);
+      if (!plotEl || !state.dataset || typeof window.Plotly === "undefined") {
+        return;
+      }
+
+      const selected = chart.selectedY.filter(index => index >= 0 && index < state.dataset.yHeaders.length);
+      const traces = selected.map(index => buildTrace(chart, index)).filter(trace => trace.x.length > 0);
+      const allX = traces.flatMap(trace => trace.x);
+      const yTraces = traces.filter(trace => trace.yaxis !== "y2");
+      const pTraces = traces.filter(trace => trace.yaxis === "y2");
+      const allY = yTraces.flatMap(trace => trace.y);
+      const allP = pTraces.flatMap(trace => trace.y);
+      const hasPAxis = pTraces.length > 0;
+      const warnings = [];
+
+      const useXLog = chart.xLog && axisCanUseLog(allX);
+      const useYLog = chart.yLog && axisCanUseLog(allY);
+      const usePLog = chart.pLog && hasPAxis && axisCanUseLog(allP);
+
+      if (chart.xLog && !useXLog) {
+        warnings.push("X 軸包含 0、負值或無有效資料，已維持線性軸。");
+      }
+
+      if (chart.yLog && !useYLog) {
+        warnings.push("Y 軸包含 0、負值或無有效資料，已維持線性軸。");
+      }
+
+      if (chart.pLog && !usePLog) {
+        warnings.push("P 軸包含 0、負值、無有效資料，或尚未指定 P 軸曲線，已維持線性軸。");
+      }
+
+      if (selected.length === 0) {
+        warnings.push("尚未選擇任何 Y 序列。");
+      }
+
+      warningEl.textContent = warnings.join(" ");
+      warningEl.classList.toggle("is-visible", warnings.length > 0);
+
+      const layout = {
+        title: { text: chart.title, font: { size: 18 } },
+        autosize: true,
+        colorway,
+        margin: { l: 78, r: hasPAxis ? 78 : 28, t: 62, b: 68 },
+        paper_bgcolor: "#ffffff",
+        plot_bgcolor: "#ffffff",
+        xaxis: {
+          title: {
+            text: chart.xAxisTitle || state.dataset.xHeader,
+            standoff: 14
+          },
+          type: useXLog ? "log" : "linear",
+          automargin: true,
+          zeroline: false,
+          showgrid: true,
+          gridcolor: "#e5edf5",
+          linecolor: "#94a3b8",
+          mirror: true
+        },
+        yaxis: {
+          title: {
+            text: chart.yAxisTitle || getDefaultYAxisTitle(),
+            standoff: 14
+          },
+          type: useYLog ? "log" : "linear",
+          automargin: true,
+          zeroline: false,
+          showgrid: true,
+          gridcolor: "#e5edf5",
+          linecolor: "#94a3b8",
+          mirror: true
+        },
+        legend: {
+          orientation: "h",
+          y: -0.2,
+          x: 0,
+          font: { size: 12 }
+        },
+        hovermode: "closest"
+      };
+
+      if (hasPAxis) {
+        layout.yaxis2 = {
+          title: {
+            text: chart.pAxisTitle || "P",
+            standoff: 14
+          },
+          type: usePLog ? "log" : "linear",
+          automargin: true,
+          overlaying: "y",
+          side: "right",
+          zeroline: false,
+          showgrid: false,
+          linecolor: "#94a3b8",
+          mirror: true
+        };
+      }
+
+      const config = {
+        responsive: true,
+        displayModeBar: true,
+        displaylogo: false,
+        toImageButtonOptions: {
+          format: "png",
+          filename: getDownloadFilename(chart),
+          height: 900,
+          width: 1400,
+          scale: 2
+        }
+      };
+
+      Plotly.react(plotEl, traces, layout, config);
+    }
+
+    function handleFile(file) {
+      if (!file) {
+        return;
+      }
+
+      if (typeof window.Papa === "undefined") {
+        showNotice("PapaParse 尚未載入，無法解析 CSV。請確認網路連線後重新整理。", "error");
+        return;
+      }
+
+      els.fileName.textContent = file.name;
+      showNotice("解析中...");
+
+      Papa.parse(file, {
+        skipEmptyLines: "greedy",
+        worker: false,
+        complete: (result) => {
+          try {
+            state.dataset = buildDataset(result, file.name);
+            resetChartsForDataset();
+            setMetricValues(state.dataset);
+            renderFieldSummary();
+            els.addChart.disabled = false;
+
+            const parseErrorCount = state.dataset.parseErrors.length;
+            const messageParts = [
+              `已載入 ${state.dataset.rows.length.toLocaleString()} 列有效資料。`
+            ];
+
+            if (state.dataset.excludedRows > 0) {
+              messageParts.push(`排除 ${state.dataset.excludedRows.toLocaleString()} 列非數值或缺少 Y 值的資料。`);
+            }
+
+            if (state.dataset.invalidCellCount > 0) {
+              messageParts.push(`另有 ${state.dataset.invalidCellCount.toLocaleString()} 個 Y 儲存格無法轉為數值，已在對應曲線中略過。`);
+            }
+
+            if (parseErrorCount > 0) {
+              messageParts.push(`PapaParse 回報 ${parseErrorCount.toLocaleString()} 個解析警告。`);
+              showNotice(messageParts.join(" "), "warning");
+            } else {
+              showNotice(messageParts.join(" "));
+            }
+          } catch (error) {
+            state.dataset = null;
+            state.charts = [];
+            setMetricValues(null);
+            renderFieldSummary();
+            renderDashboard();
+            els.addChart.disabled = true;
+            showNotice(error.message, "error");
+          }
+        },
+        error: (error) => {
+          state.dataset = null;
+          state.charts = [];
+          setMetricValues(null);
+          renderFieldSummary();
+          renderDashboard();
+          els.addChart.disabled = true;
+          showNotice(`CSV 解析失敗：${error.message}`, "error");
+        }
+      });
+    }
+
+    els.fileInput.addEventListener("change", (event) => {
+      handleFile(event.target.files[0]);
+    });
+
+    els.addChart.addEventListener("click", () => {
+      addChart(`圖表 ${state.chartSequence}`, state.dataset.yHeaders.map((_, index) => index));
+    });
+
+    document.querySelector(".file-drop").addEventListener("dragover", (event) => {
+      event.preventDefault();
+    });
+
+    document.querySelector(".file-drop").addEventListener("drop", (event) => {
+      event.preventDefault();
+      const file = event.dataTransfer.files[0];
+      if (file) {
+        handleFile(file);
+      }
+    });
+
+    window.addEventListener("resize", () => {
+      state.charts.forEach(chart => {
+        const plotEl = document.getElementById(`${chart.id}-plot`);
+        if (plotEl && typeof window.Plotly !== "undefined") {
+          Plotly.Plots.resize(plotEl);
+        }
+      });
+    });
+
+    window.addEventListener("load", () => {
+      hideNotice();
+      setLibraryStatus();
+    });
+  </script>
+</body>
+</html>
